@@ -11,7 +11,7 @@ echo ""
 # ROOT CHECK
 # =========================================
 
-if [ "$(id -u)" -ne 0 ]; then
+if [ "$(id -u)" != "0" ]; then
     echo "[!] Run script as root"
     exit 1
 fi
@@ -24,7 +24,7 @@ echo "[*] Checking internet connection..."
 
 ping -c 1 github.com >/dev/null 2>&1
 
-if [ $? -ne 0 ]; then
+if [ "$?" != "0" ]; then
     echo "[!] No internet connection"
     exit 1
 fi
@@ -59,10 +59,16 @@ read LUCI_PORT
 echo ""
 echo "[*] Detecting architecture..."
 
-ARCH="$(uname -m)"
+ARCH=""
+
+ARCH="$(uname -m 2>/dev/null)"
 
 if [ -z "$ARCH" ]; then
-    ARCH="$(uname -a)"
+    ARCH="$(uname -a 2>/dev/null)"
+fi
+
+if [ -z "$ARCH" ]; then
+    ARCH="$(cat /proc/cpuinfo 2>/dev/null)"
 fi
 
 echo "$ARCH"
@@ -70,19 +76,27 @@ echo "$ARCH"
 FRP_ARCH=""
 
 echo "$ARCH" | grep -qi "x86_64" && FRP_ARCH="amd64"
+echo "$ARCH" | grep -qi "amd64" && FRP_ARCH="amd64"
+
 echo "$ARCH" | grep -qi "aarch64" && FRP_ARCH="arm64"
+echo "$ARCH" | grep -qi "arm64" && FRP_ARCH="arm64"
+
 echo "$ARCH" | grep -qi "armv7" && FRP_ARCH="arm"
+echo "$ARCH" | grep -qi "armv6" && FRP_ARCH="arm"
 echo "$ARCH" | grep -qi "arm" && FRP_ARCH="arm"
+
 echo "$ARCH" | grep -qi "mipsel" && FRP_ARCH="mipsle"
+echo "$ARCH" | grep -qi "mipsle" && FRP_ARCH="mipsle"
+
 echo "$ARCH" | grep -qi "mips" && FRP_ARCH="mips"
 
 if [ -z "$FRP_ARCH" ]; then
     echo "[!] Unsupported architecture"
-    echo "$ARCH"
     exit 1
 fi
 
 echo "[+] Using architecture: $FRP_ARCH"
+
 # =========================================
 # INSTALL PACKAGES
 # =========================================
@@ -100,7 +114,7 @@ opkg install wget-ssl tar gzip
 echo ""
 echo "[*] Cleaning old installation..."
 
-killall frpc 2>/dev/null
+killall frpc >/dev/null 2>&1
 
 rm -rf /root/frp
 rm -f /root/frp_*.tar.gz
@@ -111,14 +125,14 @@ rm -f /root/frp_*.tar.gz
 
 FRP_VERSION="0.61.1"
 
-cd /root || exit
+cd /root || exit 1
 
 echo ""
 echo "[*] Downloading FRP $FRP_VERSION..."
 
 wget https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz
 
-if [ $? -ne 0 ]; then
+if [ "$?" != "0" ]; then
     echo "[!] Download failed"
     exit 1
 fi
@@ -134,9 +148,14 @@ echo "[*] Extracting archive..."
 
 tar -xzf frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz
 
+if [ "$?" != "0" ]; then
+    echo "[!] Extraction failed"
+    exit 1
+fi
+
 mv frp_${FRP_VERSION}_linux_${FRP_ARCH} frp
 
-cd /root/frp || exit
+cd /root/frp || exit 1
 
 chmod +x frpc
 
@@ -252,10 +271,12 @@ echo "FRP Config:"
 echo "/root/frp/frpc.toml"
 echo ""
 
-echo "Service:"
-echo "/etc/init.d/frpc"
-echo ""
-
 echo "Restart FRP:"
 echo "/etc/init.d/frpc restart"
+echo ""
+
+echo "[!] Recommended run method:"
+echo "wget https://raw.githubusercontent.com/Pterodectil/-frpinstall/main/install.sh"
+echo "chmod +x install.sh"
+echo "./install.sh"
 echo ""
