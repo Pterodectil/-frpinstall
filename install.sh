@@ -1,14 +1,5 @@
 #!/bin/sh
 
-# =========================================
-# OpenWrt FRP Auto Installer
-# =========================================
-
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
-
 clear
 
 echo "====================================="
@@ -21,7 +12,7 @@ echo ""
 # =========================================
 
 if [ "$(id -u)" -ne 0 ]; then
-    echo "${RED}[!] Run script as root${NC}"
+    echo "[!] Run script as root"
     exit 1
 fi
 
@@ -29,22 +20,23 @@ fi
 # INTERNET CHECK
 # =========================================
 
-echo "${YELLOW}[*] Checking internet connection...${NC}"
+echo "[*] Checking internet connection..."
 
 ping -c 1 github.com >/dev/null 2>&1
 
 if [ $? -ne 0 ]; then
-    echo "${RED}[!] No internet connection${NC}"
+    echo "[!] No internet connection"
     exit 1
 fi
 
-echo "${GREEN}[+] Internet OK${NC}"
+echo "[+] Internet OK"
 
 # =========================================
 # INPUT
 # =========================================
 
 echo ""
+
 printf "VPS IP: "
 read VPS_IP
 
@@ -65,39 +57,47 @@ read LUCI_PORT
 # =========================================
 
 echo ""
-echo "${YELLOW}[*] Detecting architecture...${NC}"
+echo "[*] Detecting architecture..."
 
-ARCH_INFO=$(opkg print-architecture)
+ARCH_INFO="$(opkg print-architecture)"
+
+echo "$ARCH_INFO"
+
+FRP_ARCH=""
 
 if echo "$ARCH_INFO" | grep -q "aarch64"; then
     FRP_ARCH="arm64"
+fi
 
-elif echo "$ARCH_INFO" | grep -q "arm"; then
+if echo "$ARCH_INFO" | grep -q "arm"; then
     FRP_ARCH="arm"
+fi
 
-elif echo "$ARCH_INFO" | grep -q "mipsel"; then
+if echo "$ARCH_INFO" | grep -q "mipsel"; then
     FRP_ARCH="mipsle"
+fi
 
-elif echo "$ARCH_INFO" | grep -q "mips"; then
+if echo "$ARCH_INFO" | grep -q "mips"; then
     FRP_ARCH="mips"
+fi
 
-elif echo "$ARCH_INFO" | grep -q "x86_64"; then
+if echo "$ARCH_INFO" | grep -q "x86_64"; then
     FRP_ARCH="amd64"
+fi
 
-else
-    echo "${RED}[!] Unsupported architecture${NC}"
-    echo "$ARCH_INFO"
+if [ -z "$FRP_ARCH" ]; then
+    echo "[!] Unsupported architecture"
     exit 1
 fi
 
-echo "${GREEN}[+] Using architecture: ${FRP_ARCH}${NC}"
+echo "[+] Using architecture: $FRP_ARCH"
 
 # =========================================
 # INSTALL PACKAGES
 # =========================================
 
 echo ""
-echo "${YELLOW}[*] Installing packages...${NC}"
+echo "[*] Installing packages..."
 
 opkg update
 opkg install wget-ssl tar gzip
@@ -107,7 +107,7 @@ opkg install wget-ssl tar gzip
 # =========================================
 
 echo ""
-echo "${YELLOW}[*] Cleaning old installation...${NC}"
+echo "[*] Cleaning old installation..."
 
 killall frpc 2>/dev/null
 
@@ -123,23 +123,23 @@ FRP_VERSION="0.61.1"
 cd /root || exit
 
 echo ""
-echo "${YELLOW}[*] Downloading FRP ${FRP_VERSION}...${NC}"
+echo "[*] Downloading FRP $FRP_VERSION..."
 
 wget https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz
 
 if [ $? -ne 0 ]; then
-    echo "${RED}[!] Download failed${NC}"
+    echo "[!] Download failed"
     exit 1
 fi
 
-echo "${GREEN}[+] Download completed${NC}"
+echo "[+] Download completed"
 
 # =========================================
 # EXTRACT
 # =========================================
 
 echo ""
-echo "${YELLOW}[*] Extracting archive...${NC}"
+echo "[*] Extracting archive..."
 
 tar -xzf frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz
 
@@ -149,14 +149,14 @@ cd /root/frp || exit
 
 chmod +x frpc
 
-echo "${GREEN}[+] Extraction completed${NC}"
+echo "[+] Extraction completed"
 
 # =========================================
 # CREATE CONFIG
 # =========================================
 
 echo ""
-echo "${YELLOW}[*] Creating FRP config...${NC}"
+echo "[*] Creating FRP config..."
 
 cat > /root/frp/frpc.toml <<EOF
 serverAddr = "${VPS_IP}"
@@ -182,14 +182,14 @@ localPort = 80
 remotePort = ${LUCI_PORT}
 EOF
 
-echo "${GREEN}[+] Config created${NC}"
+echo "[+] Config created"
 
 # =========================================
 # CREATE SERVICE
 # =========================================
 
 echo ""
-echo "${YELLOW}[*] Creating service...${NC}"
+echo "[*] Creating service..."
 
 cat > /etc/init.d/frpc <<'EOF'
 #!/bin/sh /etc/rc.common
@@ -211,14 +211,14 @@ EOF
 
 chmod +x /etc/init.d/frpc
 
-echo "${GREEN}[+] Service created${NC}"
+echo "[+] Service created"
 
 # =========================================
 # ENABLE SERVICE
 # =========================================
 
 echo ""
-echo "${YELLOW}[*] Starting FRP service...${NC}"
+echo "[*] Starting FRP service..."
 
 /etc/init.d/frpc enable
 /etc/init.d/frpc restart
@@ -230,12 +230,12 @@ sleep 5
 # =========================================
 
 echo ""
-echo "${YELLOW}[*] Checking FRP process...${NC}"
+echo "[*] Checking FRP process..."
 
 if ps | grep frpc | grep -v grep >/dev/null; then
-    echo "${GREEN}[+] FRP started successfully${NC}"
+    echo "[+] FRP started successfully"
 else
-    echo "${RED}[!] FRP failed to start${NC}"
+    echo "[!] FRP failed to start"
     exit 1
 fi
 
@@ -245,7 +245,7 @@ fi
 
 echo ""
 echo "====================================="
-echo "${GREEN} Installation completed${NC}"
+echo " Installation completed"
 echo "====================================="
 echo ""
 
