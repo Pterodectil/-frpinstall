@@ -61,36 +61,24 @@ echo "[*] Detecting architecture..."
 
 ARCH="$(uname -m)"
 
-echo "[*] uname -m: $ARCH"
+if [ -z "$ARCH" ]; then
+    ARCH="$(uname -a)"
+fi
+
+echo "$ARCH"
 
 FRP_ARCH=""
 
-case "$ARCH" in
-
-    x86_64)
-        FRP_ARCH="amd64"
-        ;;
-
-    aarch64|arm64)
-        FRP_ARCH="arm64"
-        ;;
-
-    arm*|armv7l)
-        FRP_ARCH="arm"
-        ;;
-
-    mipsel*|mipsle*)
-        FRP_ARCH="mipsle"
-        ;;
-
-    mips*)
-        FRP_ARCH="mips"
-        ;;
-
-esac
+echo "$ARCH" | grep -qi "x86_64" && FRP_ARCH="amd64"
+echo "$ARCH" | grep -qi "aarch64" && FRP_ARCH="arm64"
+echo "$ARCH" | grep -qi "armv7" && FRP_ARCH="arm"
+echo "$ARCH" | grep -qi "arm" && FRP_ARCH="arm"
+echo "$ARCH" | grep -qi "mipsel" && FRP_ARCH="mipsle"
+echo "$ARCH" | grep -qi "mips" && FRP_ARCH="mips"
 
 if [ -z "$FRP_ARCH" ]; then
-    echo "[!] Unsupported architecture: $ARCH"
+    echo "[!] Unsupported architecture"
+    echo "$ARCH"
     exit 1
 fi
 
