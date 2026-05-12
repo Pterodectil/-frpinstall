@@ -59,39 +59,42 @@ read LUCI_PORT
 echo ""
 echo "[*] Detecting architecture..."
 
-ARCH_INFO="$(opkg print-architecture)"
+ARCH="$(uname -m)"
 
-echo "$ARCH_INFO"
+echo "[*] uname -m: $ARCH"
 
 FRP_ARCH=""
 
-if echo "$ARCH_INFO" | grep -q "aarch64"; then
-    FRP_ARCH="arm64"
-fi
+case "$ARCH" in
 
-if echo "$ARCH_INFO" | grep -q "arm"; then
-    FRP_ARCH="arm"
-fi
+    x86_64)
+        FRP_ARCH="amd64"
+        ;;
 
-if echo "$ARCH_INFO" | grep -q "mipsel"; then
-    FRP_ARCH="mipsle"
-fi
+    aarch64|arm64)
+        FRP_ARCH="arm64"
+        ;;
 
-if echo "$ARCH_INFO" | grep -q "mips"; then
-    FRP_ARCH="mips"
-fi
+    arm*|armv7l)
+        FRP_ARCH="arm"
+        ;;
 
-if echo "$ARCH_INFO" | grep -q "x86_64"; then
-    FRP_ARCH="amd64"
-fi
+    mipsel*|mipsle*)
+        FRP_ARCH="mipsle"
+        ;;
+
+    mips*)
+        FRP_ARCH="mips"
+        ;;
+
+esac
 
 if [ -z "$FRP_ARCH" ]; then
-    echo "[!] Unsupported architecture"
+    echo "[!] Unsupported architecture: $ARCH"
     exit 1
 fi
 
 echo "[+] Using architecture: $FRP_ARCH"
-
 # =========================================
 # INSTALL PACKAGES
 # =========================================
