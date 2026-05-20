@@ -14,7 +14,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "=================================="
-echo "   FRP OpenWrt Installer v1.0"
+echo "   FRP OpenWrt Installer v1.1"
 echo "=================================="
 echo
 
@@ -22,7 +22,7 @@ echo
 # Dependencies
 ################################
 
-for CMD in wget tar grep pidof; do
+for CMD in wget tar pidof; do
     if ! command -v "$CMD" >/dev/null 2>&1; then
         echo "Missing dependency: $CMD"
         exit 1
@@ -41,7 +41,7 @@ INSTALLED=0
 
 if [ "$INSTALLED" -eq 1 ]; then
 
-    echo "Existing FRP installation found"
+    echo "FRP installation found"
     echo
     echo "1) Reinstall"
     echo "2) Exit"
@@ -51,30 +51,29 @@ if [ "$INSTALLED" -eq 1 ]; then
     read CHOICE
 
     case "$CHOICE" in
-        1)
 
-            echo
-            echo "Removing old installation..."
+    1)
 
-            if [ -f /etc/init.d/frpc ]; then
-                /etc/init.d/frpc stop >/dev/null 2>&1
-                /etc/init.d/frpc disable >/dev/null 2>&1
-            fi
+        if [ -f /etc/init.d/frpc ]; then
+            /etc/init.d/frpc stop >/dev/null 2>&1
+            /etc/init.d/frpc disable >/dev/null 2>&1
+        fi
 
-            PID=$(pidof frpc)
+        PID=$(pidof frpc)
 
-            if [ -n "$PID" ]; then
-                kill $PID >/dev/null 2>&1
-            fi
+        if [ -n "$PID" ]; then
+            kill $PID >/dev/null 2>&1
+        fi
 
-            rm -f /etc/init.d/frpc
-            rm -rf "$INSTALL_DIR"
+        rm -f /etc/init.d/frpc
+        rm -rf "$INSTALL_DIR"
 
-            echo "Done"
-            ;;
-        *)
-            exit 0
-            ;;
+        echo "Old installation removed"
+        ;;
+
+    *)
+        exit 0
+        ;;
     esac
 fi
 
@@ -87,30 +86,18 @@ mkdir -p "$INSTALL_DIR"
 printf "VPS IP/domain: "
 read VPS
 
-if [ -z "$VPS" ]; then
-    echo "VPS cannot be empty"
-    exit 1
-fi
+[ -z "$VPS" ] && exit 1
 
 printf "FRP token: "
 read TOKEN
 
-if [ -z "$TOKEN" ]; then
-    echo "Token cannot be empty"
-    exit 1
-fi
+[ -z "$TOKEN" ] && exit 1
 
 ################################
 # Architecture
 ################################
 
 ARCH=$(uname -m)
-
-if command -v opkg >/dev/null 2>&1; then
-    OPKG_ARCH=$(opkg print-architecture | awk '{print $2}')
-else
-    OPKG_ARCH=""
-fi
 
 case "$ARCH" in
 
@@ -135,13 +122,9 @@ mips*)
 ;;
 
 *)
-    echo
-    echo "Unsupported architecture:"
-    echo "$ARCH"
-    echo "$OPKG_ARCH"
+    echo "Unsupported architecture: $ARCH"
     exit 1
 ;;
-
 esac
 
 ################################
@@ -155,42 +138,37 @@ cd "$TMP_DIR" || exit 1
 FILE="frp_${VERSION}_${FRP_ARCH}.tar.gz"
 
 echo
-echo "Downloading FRP..."
+echo "Downloading..."
 
 wget -q \
 "https://github.com/fatedier/frp/releases/download/v${VERSION}/${FILE}" \
--O frp.tar.gz
+-O frp.tar.gz || {
 
-if [ $? -ne 0 ]; then
-    echo "Download failed"
-    exit 1
-fi
+echo "Download failed"
+exit 1
 
-echo "Extracting..."
+}
 
-tar -xzf frp.tar.gz
+tar -xzf frp.tar.gz || {
 
-if [ $? -ne 0 ]; then
-    echo "Extraction failed"
-    exit 1
-fi
+echo "Extract failed"
+exit 1
+
+}
 
 DIR="frp_${VERSION}_${FRP_ARCH}"
 
-if [ ! -f "$DIR/frpc" ]; then
-    echo "frpc binary not found"
-    exit 1
-fi
-
 cp "$DIR/frpc" "$INSTALL_DIR/" || {
-    echo "Failed to copy frpc"
-    exit 1
+
+echo "Copy failed"
+exit 1
+
 }
 
 chmod +x "$INSTALL_DIR/frpc"
 
 ################################
-# Config
+# Base config
 ################################
 
 cat > "$CONFIG" <<EOF
@@ -201,128 +179,77 @@ auth.method = "token"
 auth.token = "${TOKEN}"
 EOF
 
-COUNT=0
-USED_PORTS=""
-
-while true
-do
+################################
+# Port setup
+################################
 
 echo
+echo "Select mode:"
+echo "1) SSH + LuCI preset"
+echo "2) Custom ports"
+echo
 
-printf "Connection name: "
-read NAME
+printf "Choice: "
+read MODE
 
-[ -z "$NAME" ] && continue
+COUNT=0
+USED=""
 
-printf "Router local port: "
-read LPORT
+case "$MODE" in
 
-printf "VPS remote port: "
-read RPORT
+1)
 
-case "$LPORT" in
-*[!0-9]*|"")
-    echo "Invalid local port"
-    continue
+printf "SSH external port: "
+read SSHPORT
+
+printf "LuCI external port: "
+read LUCIPORT
+
+echo
+echo "LuCI type:"
+echo "1) HTTP (80)"
+echo "2) HTTPS (443)"
+
+printf "Choice: "
+read LMODE
+
+case "$LMODE" in
+2)
+LPORT=443
+;;
+*)
+LPORT=80
 ;;
 esac
 
-case "$RPORT" in
+for PORT in "$SSHPORT" "$LUCIPORT"
+do
+
+case "$PORT" in
 *[!0-9]*|"")
-    echo "Invalid remote port"
-    continue
+echo "Invalid port"
+exit 1
 ;;
 esac
 
-if [ "$LPORT" -lt 1 ] || [ "$LPORT" -gt 65535 ]; then
-    echo "Local port out of range"
-    continue
+if [ "$PORT" -eq 7000 ]
+then
+echo "7000 reserved for FRP"
+exit 1
 fi
 
-if [ "$RPORT" -lt 1 ] || [ "$RPORT" -gt 65535 ]; then
-    echo "Remote port out of range"
-    continue
-fi
-
-case " $USED_PORTS " in
-*" $RPORT "*)
-    echo "Remote port already used"
-    continue
-;;
-esac
-
-USED_PORTS="$USED_PORTS $RPORT"
+done
 
 cat >> "$CONFIG" <<EOF
 
 [[proxies]]
-name = "${NAME}"
+name = "ssh"
 type = "tcp"
 localIP = "127.0.0.1"
-localPort = ${LPORT}
-remotePort = ${RPORT}
-EOF
+localPort = 22
+remotePort = ${SSHPORT}
 
-COUNT=$((COUNT+1))
-
-printf "Add another port? (y/n): "
-read ADD
-
-[ "$ADD" != "y" ] && break
-
-done
-
-if [ "$COUNT" -eq 0 ]; then
-    echo "No ports configured"
-    exit 1
-fi
-
-################################
-# Service
-################################
-
-cat >/etc/init.d/frpc <<'EOF'
-#!/bin/sh /etc/rc.common
-
-START=99
-USE_PROCD=1
-
-start_service() {
-    procd_open_instance
-    procd_set_param command \
-        /root/frp/frpc \
-        -c \
-        /root/frp/frpc.toml
-    procd_set_param respawn
-    procd_close_instance
-}
-EOF
-
-chmod +x /etc/init.d/frpc
-
-printf "Enable autostart? (y/n): "
-read AUTO
-
-if [ "$AUTO" = "y" ]; then
-    /etc/init.d/frpc enable
-fi
-
-/etc/init.d/frpc stop >/dev/null 2>&1
-/etc/init.d/frpc start
-
-sleep 5
-
-echo
-
-PID=$(pidof frpc)
-
-if [ -n "$PID" ]; then
-    echo "FRP running (PID: $PID)"
-else
-    echo "FRP failed"
-    echo
-    logread | tail -20
-fi
-
-echo
-echo "Config: $CONFIG"
+[[proxies]]
+name = "luci"
+type = "tcp"
+localIP
