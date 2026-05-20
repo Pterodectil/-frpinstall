@@ -14,86 +14,71 @@ cleanup() {
 trap cleanup EXIT
 
 echo "=================================="
-echo "   FRP OpenWrt Installer v1.3"
+echo "   FRP OpenWrt Installer v2.0"
 echo "=================================="
 echo
 
 # Dependencies
 for CMD in wget tar pidof
 do
-    if ! command -v "$CMD" >/dev/null 2>&1
-    then
+    command -v "$CMD" >/dev/null 2>&1 || {
         echo "Missing dependency: $CMD"
         exit 1
-    fi
+    }
 done
 
 # Existing install
-INSTALLED=0
-
-[ -f "$INSTALL_DIR/frpc" ] && INSTALLED=1
-[ -f "$CONFIG" ] && INSTALLED=1
-[ -f "/etc/init.d/frpc" ] && INSTALLED=1
-
-if [ "$INSTALLED" -eq 1 ]
+if [ -f "$INSTALL_DIR/frpc" ] || [ -f "/etc/init.d/frpc" ]
 then
     echo "FRP installation found"
-    echo
     echo "1) Reinstall"
     echo "2) Exit"
-    echo
 
     printf "Choice: "
     read CHOICE
 
-    case "$CHOICE" in
+    if [ "$CHOICE" = "1" ]
+    then
 
-        1)
-            if [ -f /etc/init.d/frpc ]
-            then
-                /etc/init.d/frpc stop >/dev/null 2>&1
-                /etc/init.d/frpc disable >/dev/null 2>&1
-            fi
+        if [ -f /etc/init.d/frpc ]
+        then
+            /etc/init.d/frpc stop >/dev/null 2>&1
+            /etc/init.d/frpc disable >/dev/null 2>&1
+        fi
 
-            PID=$(pidof frpc)
+        PID=$(pidof frpc)
 
-            if [ -n "$PID" ]
-            then
-                kill $PID >/dev/null 2>&1
-            fi
+        if [ -n "$PID" ]
+        then
+            kill $PID >/dev/null 2>&1
+        fi
 
-            rm -f /etc/init.d/frpc
-            rm -rf "$INSTALL_DIR"
+        rm -rf "$INSTALL_DIR"
+        rm -f /etc/init.d/frpc
 
-            echo "Old installation removed"
-        ;;
-
-        *)
-            exit 0
-        ;;
-
-    esac
+    else
+        exit 0
+    fi
 fi
 
 mkdir -p "$INSTALL_DIR"
+mkdir -p "$TMP_DIR"
 
 printf "VPS IP/domain: "
 read VPS
 
-if [ -z "$VPS" ]
-then
+[ -z "$VPS" ] && {
     echo "Empty VPS"
     exit 1
-fi
+}
 
 printf "FRP token: "
 read TOKEN
 
-if [ -z "$TOKEN" ]
-then
+[ -z "$TOKEN" ] && {
     echo "Empty token"
     exit 1
-fi
+}
 
 ARCH=$(uname -m)
 
@@ -126,8 +111,6 @@ mips*)
 
 esac
 
-mkdir -p "$TMP_DIR"
-
 cd "$TMP_DIR" || exit 1
 
 FILE="frp_${VERSION}_${FRP_ARCH}.tar.gz"
@@ -141,4 +124,143 @@ wget -q \
 
 if [ $? -ne 0 ]
 then
-    echo "
+    echo "Download failed"
+    exit 1
+fi
+
+echo "Extracting..."
+
+tar -xzf frp.tar.gz || exit 1
+
+DIR="frp_${VERSION}_${FRP_ARCH}"
+
+if [ ! -f "$DIR/frpc" ]
+then
+    echo "frpc not found"
+    exit 1
+fi
+
+cp "$DIR/frpc" "$INSTALL_DIR/frpc" || exit 1
+chmod +x "$INSTALL_DIR/frpc"
+
+cat > "$CONFIG" <<EOF
+serverAddr = "$VPS"
+serverPort = 7000
+
+auth.method = "token"
+auth.token = "$TOKEN"
+EOF
+
+echo
+echo "1) SSH + LuCI preset"
+echo "2) Custom"
+
+printf "Choice: "
+read MODE
+
+if [ "$MODE" = "1" ]
+then
+
+    printf "SSH external port: "
+    read SSHPORT
+
+    printf "LuCI external port: "
+    read LUCIPORT
+
+cat >> "$CONFIG" <<EOF
+
+[[proxies]]
+name = "ssh"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 22
+remotePort = $SSHPORT
+
+[[proxies]]
+name = "luci"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 80
+remotePort = $LUCIPORT
+EOF
+
+else
+
+while true
+do
+
+printf "Connection name: "
+read NAME
+
+printf "Local port: "
+read LPORT
+
+printf "Remote port: "
+read RPORT
+
+[ "$RPORT" = "7000" ] && {
+    echo "7000 reserved"
+    continue
+}
+
+cat >> "$CONFIG" <<EOF
+
+[[proxies]]
+name = "$NAME"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = $LPORT
+remotePort = $RPORT
+EOF
+
+printf "Add another? (y/n): "
+read ADD
+
+[ "$ADD" != "y" ] && break
+
+done
+
+fi
+
+cat >/etc/init.d/frpc <<'EOF'
+#!/bin/sh /etc/rc.common
+
+START=99
+USE_PROCD=1
+
+start_service() {
+    procd_open_instance
+    procd_set_param command /root/frp/frpc -c /root/frp/frpc.toml
+    procd_set_param respawn
+    procd_close_instance
+}
+EOF
+
+chmod +x /etc/init.d/frpc
+
+printf "Enable autostart? (y/n): "
+read AUTO
+
+if [ "$AUTO" = "y" ]
+then
+    /etc/init.d/frpc enable
+fi
+
+/etc/init.d/frpc stop >/dev/null 2>&1
+/etc/init.d/frpc start
+
+sleep 3
+
+PID=$(pidof frpc)
+
+echo
+
+if [ -n "$PID" ]
+then
+    echo "FRP running (PID: $PID)"
+else
+    echo "FRP failed"
+fi
+
+echo
+echo "Config: $CONFIG"
