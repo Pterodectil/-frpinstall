@@ -2,281 +2,327 @@
 
 clear
 
-echo "====================================="
-echo "     OpenWrt FRP Installer"
-echo "====================================="
-echo ""
+INSTALL_DIR="/root/frp"
+TMP_DIR="/tmp/frp_install"
+CONFIG="$INSTALL_DIR/frpc.toml"
+VERSION="0.65.0"
 
-# =========================================
-# ROOT CHECK
-# =========================================
+cleanup() {
+    rm -rf "$TMP_DIR" >/dev/null 2>&1
+}
 
-if [ "$(id -u)" != "0" ]; then
-    echo "[!] Run script as root"
+trap cleanup EXIT
+
+echo "=================================="
+echo "   FRP OpenWrt Installer v1.0"
+echo "=================================="
+echo
+
+################################
+# Dependencies
+################################
+
+for CMD in wget tar grep pidof; do
+    if ! command -v "$CMD" >/dev/null 2>&1; then
+        echo "Missing dependency: $CMD"
+        exit 1
+    fi
+done
+
+################################
+# Existing installation
+################################
+
+INSTALLED=0
+
+[ -f "$INSTALL_DIR/frpc" ] && INSTALLED=1
+[ -f "$CONFIG" ] && INSTALLED=1
+[ -f "/etc/init.d/frpc" ] && INSTALLED=1
+
+if [ "$INSTALLED" -eq 1 ]; then
+
+    echo "Existing FRP installation found"
+    echo
+    echo "1) Reinstall"
+    echo "2) Exit"
+    echo
+
+    printf "Choice: "
+    read CHOICE
+
+    case "$CHOICE" in
+        1)
+
+            echo
+            echo "Removing old installation..."
+
+            if [ -f /etc/init.d/frpc ]; then
+                /etc/init.d/frpc stop >/dev/null 2>&1
+                /etc/init.d/frpc disable >/dev/null 2>&1
+            fi
+
+            PID=$(pidof frpc)
+
+            if [ -n "$PID" ]; then
+                kill $PID >/dev/null 2>&1
+            fi
+
+            rm -f /etc/init.d/frpc
+            rm -rf "$INSTALL_DIR"
+
+            echo "Done"
+            ;;
+        *)
+            exit 0
+            ;;
+    esac
+fi
+
+mkdir -p "$INSTALL_DIR"
+
+################################
+# User input
+################################
+
+printf "VPS IP/domain: "
+read VPS
+
+if [ -z "$VPS" ]; then
+    echo "VPS cannot be empty"
     exit 1
 fi
 
-# =========================================
-# INTERNET CHECK
-# =========================================
+printf "FRP token: "
+read TOKEN
 
-echo "[*] Checking internet connection..."
-
-ping -c 1 github.com >/dev/null 2>&1
-
-if [ "$?" != "0" ]; then
-    echo "[!] No internet connection"
+if [ -z "$TOKEN" ]; then
+    echo "Token cannot be empty"
     exit 1
 fi
 
-echo "[+] Internet OK"
+################################
+# Architecture
+################################
 
-# =========================================
-# INPUT
-# =========================================
+ARCH=$(uname -m)
 
-echo ""
-
-printf "VPS IP: "
-read VPS_IP
-
-printf "FRP Token: "
-read FRP_TOKEN
-
-printf "Router Name: "
-read ROUTER_NAME
-
-printf "SSH Port (example 6001): "
-read SSH_PORT
-
-printf "LuCI Port (example 7001): "
-read LUCI_PORT
-
-# =========================================
-# ARCH DETECTION
-# =========================================
-
-echo ""
-echo "[*] Detecting architecture..."
-
-ARCH=""
-
-ARCH="$(uname -m 2>/dev/null)"
-
-if [ -z "$ARCH" ]; then
-    ARCH="$(uname -a 2>/dev/null)"
+if command -v opkg >/dev/null 2>&1; then
+    OPKG_ARCH=$(opkg print-architecture | awk '{print $2}')
+else
+    OPKG_ARCH=""
 fi
 
-if [ -z "$ARCH" ]; then
-    ARCH="$(cat /proc/cpuinfo 2>/dev/null)"
-fi
+case "$ARCH" in
 
-echo "$ARCH"
+aarch64|aarch64_generic)
+    FRP_ARCH="linux_arm64"
+;;
 
-FRP_ARCH=""
+armv7*|armv6*|armv8l)
+    FRP_ARCH="linux_arm"
+;;
 
-echo "$ARCH" | grep -qi "x86_64" && FRP_ARCH="amd64"
-echo "$ARCH" | grep -qi "amd64" && FRP_ARCH="amd64"
+x86_64)
+    FRP_ARCH="linux_amd64"
+;;
 
-echo "$ARCH" | grep -qi "aarch64" && FRP_ARCH="arm64"
-echo "$ARCH" | grep -qi "arm64" && FRP_ARCH="arm64"
+mipsel*)
+    FRP_ARCH="linux_mipsle"
+;;
 
-echo "$ARCH" | grep -qi "armv7" && FRP_ARCH="arm"
-echo "$ARCH" | grep -qi "armv6" && FRP_ARCH="arm"
-echo "$ARCH" | grep -qi "arm" && FRP_ARCH="arm"
+mips*)
+    FRP_ARCH="linux_mips"
+;;
 
-echo "$ARCH" | grep -qi "mipsel" && FRP_ARCH="mipsle"
-echo "$ARCH" | grep -qi "mipsle" && FRP_ARCH="mipsle"
+*)
+    echo
+    echo "Unsupported architecture:"
+    echo "$ARCH"
+    echo "$OPKG_ARCH"
+    exit 1
+;;
 
-echo "$ARCH" | grep -qi "mips" && FRP_ARCH="mips"
+esac
 
-if [ -z "$FRP_ARCH" ]; then
-    echo "[!] Unsupported architecture"
+################################
+# Download
+################################
+
+mkdir -p "$TMP_DIR"
+
+cd "$TMP_DIR" || exit 1
+
+FILE="frp_${VERSION}_${FRP_ARCH}.tar.gz"
+
+echo
+echo "Downloading FRP..."
+
+wget -q \
+"https://github.com/fatedier/frp/releases/download/v${VERSION}/${FILE}" \
+-O frp.tar.gz
+
+if [ $? -ne 0 ]; then
+    echo "Download failed"
     exit 1
 fi
 
-echo "[+] Using architecture: $FRP_ARCH"
+echo "Extracting..."
 
-# =========================================
-# INSTALL PACKAGES
-# =========================================
+tar -xzf frp.tar.gz
 
-echo ""
-echo "[*] Installing packages..."
-
-opkg update
-opkg install wget-ssl tar gzip
-
-# =========================================
-# CLEANUP OLD INSTALL
-# =========================================
-
-echo ""
-echo "[*] Cleaning old installation..."
-
-killall frpc >/dev/null 2>&1
-
-rm -rf /root/frp
-rm -f /root/frp_*.tar.gz
-
-# =========================================
-# DOWNLOAD FRP
-# =========================================
-
-FRP_VERSION="0.61.1"
-
-cd /root || exit 1
-
-echo ""
-echo "[*] Downloading FRP $FRP_VERSION..."
-
-wget https://github.com/fatedier/frp/releases/download/v${FRP_VERSION}/frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz
-
-if [ "$?" != "0" ]; then
-    echo "[!] Download failed"
+if [ $? -ne 0 ]; then
+    echo "Extraction failed"
     exit 1
 fi
 
-echo "[+] Download completed"
+DIR="frp_${VERSION}_${FRP_ARCH}"
 
-# =========================================
-# EXTRACT
-# =========================================
-
-echo ""
-echo "[*] Extracting archive..."
-
-tar -xzf frp_${FRP_VERSION}_linux_${FRP_ARCH}.tar.gz
-
-if [ "$?" != "0" ]; then
-    echo "[!] Extraction failed"
+if [ ! -f "$DIR/frpc" ]; then
+    echo "frpc binary not found"
     exit 1
 fi
 
-mv frp_${FRP_VERSION}_linux_${FRP_ARCH} frp
+cp "$DIR/frpc" "$INSTALL_DIR/" || {
+    echo "Failed to copy frpc"
+    exit 1
+}
 
-cd /root/frp || exit 1
+chmod +x "$INSTALL_DIR/frpc"
 
-chmod +x frpc
+################################
+# Config
+################################
 
-echo "[+] Extraction completed"
-
-# =========================================
-# CREATE CONFIG
-# =========================================
-
-echo ""
-echo "[*] Creating FRP config..."
-
-cat > /root/frp/frpc.toml <<EOF
-serverAddr = "${VPS_IP}"
+cat > "$CONFIG" <<EOF
+serverAddr = "${VPS}"
 serverPort = 7000
 
 auth.method = "token"
-auth.token = "${FRP_TOKEN}"
-
-transport.tcpMux = true
-
-[[proxies]]
-name = "${ROUTER_NAME}-ssh"
-type = "tcp"
-localIP = "127.0.0.1"
-localPort = 22
-remotePort = ${SSH_PORT}
-
-[[proxies]]
-name = "${ROUTER_NAME}-luci"
-type = "tcp"
-localIP = "127.0.0.1"
-localPort = 80
-remotePort = ${LUCI_PORT}
+auth.token = "${TOKEN}"
 EOF
 
-echo "[+] Config created"
+COUNT=0
+USED_PORTS=""
 
-# =========================================
-# CREATE SERVICE
-# =========================================
+while true
+do
 
-echo ""
-echo "[*] Creating service..."
+echo
 
-cat > /etc/init.d/frpc <<'EOF'
+printf "Connection name: "
+read NAME
+
+[ -z "$NAME" ] && continue
+
+printf "Router local port: "
+read LPORT
+
+printf "VPS remote port: "
+read RPORT
+
+case "$LPORT" in
+*[!0-9]*|"")
+    echo "Invalid local port"
+    continue
+;;
+esac
+
+case "$RPORT" in
+*[!0-9]*|"")
+    echo "Invalid remote port"
+    continue
+;;
+esac
+
+if [ "$LPORT" -lt 1 ] || [ "$LPORT" -gt 65535 ]; then
+    echo "Local port out of range"
+    continue
+fi
+
+if [ "$RPORT" -lt 1 ] || [ "$RPORT" -gt 65535 ]; then
+    echo "Remote port out of range"
+    continue
+fi
+
+case " $USED_PORTS " in
+*" $RPORT "*)
+    echo "Remote port already used"
+    continue
+;;
+esac
+
+USED_PORTS="$USED_PORTS $RPORT"
+
+cat >> "$CONFIG" <<EOF
+
+[[proxies]]
+name = "${NAME}"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = ${LPORT}
+remotePort = ${RPORT}
+EOF
+
+COUNT=$((COUNT+1))
+
+printf "Add another port? (y/n): "
+read ADD
+
+[ "$ADD" != "y" ] && break
+
+done
+
+if [ "$COUNT" -eq 0 ]; then
+    echo "No ports configured"
+    exit 1
+fi
+
+################################
+# Service
+################################
+
+cat >/etc/init.d/frpc <<'EOF'
 #!/bin/sh /etc/rc.common
 
 START=99
 USE_PROCD=1
 
 start_service() {
-
     procd_open_instance
-
-    procd_set_param command /root/frp/frpc -c /root/frp/frpc.toml
-
+    procd_set_param command \
+        /root/frp/frpc \
+        -c \
+        /root/frp/frpc.toml
     procd_set_param respawn
-
     procd_close_instance
 }
 EOF
 
 chmod +x /etc/init.d/frpc
 
-echo "[+] Service created"
+printf "Enable autostart? (y/n): "
+read AUTO
 
-# =========================================
-# ENABLE SERVICE
-# =========================================
+if [ "$AUTO" = "y" ]; then
+    /etc/init.d/frpc enable
+fi
 
-echo ""
-echo "[*] Starting FRP service..."
-
-/etc/init.d/frpc enable
-/etc/init.d/frpc restart
+/etc/init.d/frpc stop >/dev/null 2>&1
+/etc/init.d/frpc start
 
 sleep 5
 
-# =========================================
-# STATUS CHECK
-# =========================================
+echo
 
-echo ""
-echo "[*] Checking FRP process..."
+PID=$(pidof frpc)
 
-if ps | grep frpc | grep -v grep >/dev/null; then
-    echo "[+] FRP started successfully"
+if [ -n "$PID" ]; then
+    echo "FRP running (PID: $PID)"
 else
-    echo "[!] FRP failed to start"
-    exit 1
+    echo "FRP failed"
+    echo
+    logread | tail -20
 fi
 
-# =========================================
-# DONE
-# =========================================
-
-echo ""
-echo "====================================="
-echo " Installation completed"
-echo "====================================="
-echo ""
-
-echo "SSH:"
-echo "ssh root@${VPS_IP} -p ${SSH_PORT}"
-echo ""
-
-echo "LuCI:"
-echo "http://${VPS_IP}:${LUCI_PORT}"
-echo ""
-
-echo "FRP Config:"
-echo "/root/frp/frpc.toml"
-echo ""
-
-echo "Restart FRP:"
-echo "/etc/init.d/frpc restart"
-echo ""
-
-echo "[!] Recommended run method:"
-echo "wget https://raw.githubusercontent.com/Pterodectil/-frpinstall/main/install.sh"
-echo "chmod +x install.sh"
-echo "./install.sh"
-echo ""
+echo
+echo "Config: $CONFIG"
